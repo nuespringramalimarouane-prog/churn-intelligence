@@ -1,2 +1,2 @@
 SeniorCitizen,Partner,Dependents,tenure,PhoneService,MultipleLines,OnlineSecurity,OnlineBackup,DeviceProtection,TechSupport,StreamingTV,StreamingMovies,PaperlessBilling,MonthlyCharges,gender_Female,InternetService_DSL,InternetService_No,Contract_One year,Contract_Two year,PaymentMethod_Bank transfer (automatic),PaymentMethod_Credit card (automatic),PaymentMethod_Electronic check,PaymentMethod_Mailed check
-0,0,0,8,1,0,0,0,0,0,0,0,1,75.5,0,0,0,0,0,0,0,1,0
+0,0,0,20,0,1,1,0,1,0,1,1,1,600.0,0,1,0,0,0,0,0,1,0

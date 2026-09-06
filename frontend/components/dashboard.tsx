@@ -423,15 +423,22 @@ function Comparison({
         </button>
       </div>
       <div className="table">
-        {results.map((r) => (
-          <div className="row" key={r.model}>
-            <b>{r.model}</b>
-            <strong className={r.prediction === "CHURN" ? "danger" : ""}>
-              {r.prediction}
-            </strong>
-            <span>{Math.round(r.probability * 100)}%</span>
-          </div>
-        ))}
+        {results.map((r) => {
+          const failed = r.prediction === "ERROR";
+          return (
+            <div className={failed ? "row row-error" : "row"} key={r.model}>
+              <b>{r.model}</b>
+              {failed ? (
+                <strong className="danger">Unavailable</strong>
+              ) : (
+                <strong className={r.prediction === "CHURN" ? "danger" : ""}>
+                  {r.prediction}
+                </strong>
+              )}
+              <span>{failed ? "—" : `${Math.round(r.probability * 100)}%`}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -441,8 +448,9 @@ export default function Dashboard() {
   const [result, setResult] = useState<Prediction>({
     prediction: "CHURN",
     probability: 0.78,
-    model: "Logistic Regression",
+    model: "logistic_regression.pkl",
     customer: initial,
+    all_models: [],
   });
   const [comparison, setComparison] = useState<Prediction[] | null>(null);
   return (
@@ -455,12 +463,8 @@ export default function Dashboard() {
         <PredictionCard
           result={result}
           onOpen={() => setOpen(true)}
-          onCompare={async () => {
-            try {
-              setComparison(await compareModels(result.customer));
-            } catch {
-              setComparison(null);
-            }
+          onCompare={() => {
+            setComparison(compareModels(result));
           }}
         />
       </div>

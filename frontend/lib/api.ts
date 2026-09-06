@@ -22,11 +22,19 @@ export type CustomerData = {
   Model: string;
 };
 
+export type ModelResult = {
+  model: string;
+  prediction: "CHURN" | "NO CHURN" | "ERROR";
+  probability: number;
+  error?: string;
+};
+
 export type Prediction = {
-  prediction: "CHURN" | "NO CHURN";
+  prediction: "CHURN" | "NO CHURN" | "ERROR" ;
   probability: number;
   model: string;
   customer: CustomerData;
+  all_models: ModelResult[];
 };
 
 // Update these to match your actual .pkl filenames in python-api/models/
@@ -63,6 +71,14 @@ export async function predictCustomer(data: CustomerData): Promise<Prediction> {
   return postJSON<Prediction>("/api/predict", data);
 }
 
-export async function compareModels(data: CustomerData): Promise<Prediction[]> {
-  return postJSON<Prediction[]>("/api/compare", data);
+// No network call: /api/predict already returned every model's result,
+// this just reshapes that data for the comparison view.
+export function compareModels(prediction: Prediction): Prediction[] {
+  return prediction.all_models.map((m) => ({
+    prediction: m.prediction === "ERROR" ? "NO CHURN" : m.prediction,
+    probability: m.probability,
+    model: m.model,
+    customer: prediction.customer,
+    all_models: prediction.all_models,
+  }));
 }

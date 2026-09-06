@@ -71,11 +71,29 @@ class CustomerData(BaseModel):
     Model: str
 
 
+class ModelResult(BaseModel):
+    model: str
+    prediction: str
+    probability: float
+    error: str | None = None
+
+
 class PredictionResponse(BaseModel):
     prediction: str
     probability: float
     model: str
     customer: CustomerData
+    all_models: list[ModelResult]
+
+
+# Every model file /predict will score in one request.
+# Keep this list in sync with `models` in your Next.js lib/api.ts.
+ALL_MODEL_FILES = [
+    "logistic_regression.pkl",
+    "gradient_boosting.pkl",
+    "random_forest.pkl",
+    "voting_classifier.pkl",
+]
 
 
 # Exact columns/order the model was trained on. TotalCharges is NOT used.
@@ -150,32 +168,41 @@ async def health():
     return {"status": "ok"}
 
 
+def _score_model(model_name: str, df: pd.DataFrame) -> ModelResult:
+    """Run one model against the already-cleaned dataframe."""
+    try:
+        model = load_model(model_name)
+        try:
+            proba = model.predict_proba(df)[0]
+            churn_probability = float(proba[1])
+        except AttributeError:
+            pred = model.predict(df)[0]
+            churn_probability = 1.0 if pred in (1, "Yes", "CHURN") else 0.0
+
+        label = "CHURN" if churn_probability >= 0.5 else "NO CHURN"
+        return ModelResult(model=model_name, prediction=label, probability=churn_probability)
+    except Exception as e:
+        # Don't let one bad/missing model file fail the whole request —
+        # surface the error for that model and keep going.
+        return ModelResult(model=model_name, prediction="ERROR", probability=0.0, error=str(e))
+
+
 @app.post("/predict", response_model=PredictionResponse)
 async def prediction(data: CustomerData):
-    model = load_model(data.Model)
     df = clean_customer_data(data)
 
-    try:
-        proba = model.predict_proba(df)[0]
-        # Assumes index 1 = "churn" class. Flip to [0] if your encoder
-        # mapped churn to 0 instead of 1.
-        churn_probability = float(proba[1])
-    except AttributeError:
-        pred = model.predict(df)[0]
-        churn_probability = 1.0 if pred in (1, "Yes", "CHURN") else 0.0
-    except ValueError as e:
-        # Most common cause: the model expects numeric/encoded columns but
-        # got raw strings ("Male", "Fiber optic", ...). See note below.
-        raise HTTPException(
-            status_code=500,
-            detail=f"Model input mismatch — check preprocessing: {e}",
-        )
+    all_models = [_score_model(name, df) for name in ALL_MODEL_FILES]
 
-    label = "CHURN" if churn_probability >= 0.5 else "NO CHURN"
+    primary = next((m for m in all_models if m.model == data.Model), None)
+    if primary is None:
+        raise HTTPException(status_code=400, detail=f"Unknown model: {data.Model}")
+    if primary.error:
+        raise HTTPException(status_code=500, detail=f"Model input mismatch — check preprocessing: {primary.error}")
 
     return PredictionResponse(
-        prediction=label,
-        probability=churn_probability,
-        model=data.Model,
+        prediction=primary.prediction,
+        probability=primary.probability,
+        model=primary.model,
         customer=data,
+        all_models=all_models,
     )
