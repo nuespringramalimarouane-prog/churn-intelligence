@@ -6,7 +6,7 @@ from sklearn.preprocessing import OneHotEncoder
 logging.getLogger(__name__)
 
 
-dataset = Path("./data/dataset-telecom.csv")
+dataset = Path("./data/real_samples.csv")
 df = None
 try: 
     if dataset.exists():
@@ -15,8 +15,8 @@ try:
         raise FileNotFoundError("file not found")
 except FileNotFoundError as e:
     logging.error(f"{e} : {dataset}")
-
-""" --drop useless columns ["customerID","TotalCharges"] """
+print(df.dtypes)
+""" --drop useless columns ["customerID"] """
 df = df.drop(columns=["customerID","TotalCharges"])
 
 """ --encode gender classes ['Female','Male'] """
@@ -53,10 +53,19 @@ df = df.drop(["gender","InternetService","Contract","PaymentMethod"],axis=1).joi
 df["MultipleLines"] = pd.DataFrame(df["MultipleLines"]).replace({"No phone service":"No"})
 df[["OnlineSecurity","StreamingMovies","OnlineBackup","DeviceProtection","TechSupport","StreamingTV"]] = pd.DataFrame(df[["OnlineSecurity","StreamingMovies","OnlineBackup","DeviceProtection","TechSupport","StreamingTV"]]).replace({"No internet service":"No"})
 
-df[["Partner","StreamingMovies","Dependents","PhoneService","MultipleLines","OnlineSecurity","OnlineBackup","DeviceProtection","TechSupport","StreamingTV","PaperlessBilling","Churn"]] = pd.DataFrame(df[["Partner","StreamingMovies","Dependents","PhoneService","MultipleLines","OnlineSecurity","OnlineBackup","DeviceProtection","TechSupport","StreamingTV","PaperlessBilling","Churn"]].replace({"Yes":1,"No":0}),dtype=int)
+df[["Partner","StreamingMovies","Dependents","MultipleLines","OnlineSecurity","OnlineBackup","DeviceProtection","TechSupport","StreamingTV","PaperlessBilling","Churn","PhoneService"]] = pd.DataFrame(df[["Partner","StreamingMovies","Dependents","MultipleLines","OnlineSecurity","OnlineBackup","DeviceProtection","TechSupport","StreamingTV","PaperlessBilling","Churn","PhoneService"]].replace({"Yes":1,"No":0}),dtype=int)
+
 df.info()
-df.dropna()
 df.shape
 df["Churn"]
-save_data_path = Path("./data") / 'data_cleaned.csv'
-df.to_csv(save_data_path,index=False)
+# df["TotalCharges"] = pd.to_numeric(df["TotalCharges"], errors="coerce")
+
+df = df.drop(columns=["Contract_Month-to-month","gender_Male","InternetService_Fiber optic"])
+print(df["PhoneService"].isna())
+
+df = df.dropna(axis=0)
+df.drop_duplicates()
+df.info()
+
+# save_data_path = Path("./data") / '_cleaned.csv'
+# df.to_csv(save_data_path,index=False)
