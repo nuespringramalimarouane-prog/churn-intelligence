@@ -1,5 +1,7 @@
 # Telecom Churn Intelligence
 
+project notebook on kaggle : https://www.kaggle.com/code/nuespring/churn-intelligence-comparing-4-ml-classification
+
 Telecom Churn Intelligence is a customer-risk dashboard for predicting whether a telecom customer is likely to leave. It combines:
 
 - A Next.js frontend in `frontend/`.
