@@ -1,16 +1,14 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from pathlib import Path
-import pandas as pd
 import pickle
 import joblib
 import os
 
+import pandas as pd
+
 app = FastAPI(title="Churn Prediction API")
 
-# Allows your Next.js server to call this API. In production, replace "*"
-# with your actual dashboard origin (e.g. "https://your-dashboard.com").
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,30 +16,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Put your .pkl files in a "models" folder next to this file, e.g.:
-#   python-api/models/logistic_regression.pkl
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
-
-_model_cache: dict[str, object] = {}  # filled lazily by load_model(), do not pre-seed with paths
+_model_cache: dict[str, object] = {}
 
 
 def load_model(model_name: str):
-    """Load a model by filename, caching it after first load.
-    Tries joblib first (the common format for sklearn models), falls
-    back to plain pickle for files saved that way instead.
-    """
+    if model_name not in ALL_MODEL_FILES:
+        raise HTTPException(status_code=400, detail=f"Unknown model: {model_name}")
     if model_name in _model_cache:
         return _model_cache[model_name]
 
     model_path = os.path.join(MODELS_DIR, model_name)
-    if not os.path.exists(model_path):
+    if not os.path.isfile(model_path):
         raise HTTPException(status_code=400, detail=f"Unknown model: {model_name}")
 
     try:
         model = joblib.load(model_path)
     except Exception:
-        with open(model_path, "rb") as f:
-            model = pickle.load(f)
+        with open(model_path, "rb") as model_file:
+            model = pickle.load(model_file)
 
     _model_cache[model_name] = model
     return model
@@ -86,8 +79,6 @@ class PredictionResponse(BaseModel):
     all_models: list[ModelResult]
 
 
-# Every model file /predict will score in one request.
-# Keep this list in sync with `models` in your Next.js lib/api.ts.
 ALL_MODEL_FILES = [
     "logistic_regression.pkl",
     "gradient_boosting.pkl",
@@ -95,8 +86,6 @@ ALL_MODEL_FILES = [
     "voting_classifier.pkl",
 ]
 
-
-# Exact columns/order the model was trained on. TotalCharges is NOT used.
 FEATURE_COLUMNS = [
     "SeniorCitizen", "Partner", "Dependents", "tenure", "PhoneService",
     "MultipleLines", "OnlineSecurity", "OnlineBackup", "DeviceProtection",
@@ -108,26 +97,13 @@ FEATURE_COLUMNS = [
     "PaymentMethod_Electronic check", "PaymentMethod_Mailed check",
 ]
 
-CLEAN_SAMPLE_PATH = Path(__file__).parent / "data" / "clean_sample_api.csv"
-
 
 def _yes_no(value: str) -> int:
-    # Mirrors: .replace({"No phone service": "No", "No internet service": "No"})
-    # followed by .replace({"Yes": 1, "No": 0}) in the batch cleaning script.
     return 1 if value == "Yes" else 0
 
 
 def clean_customer_data(data: CustomerData) -> pd.DataFrame:
-    """Reproduces the batch cleaning script's transformations for one
-    incoming request, writes the result to clean_sample_api.csv, then
-    reads it back for prediction (matching the requested workflow).
-
-    The batch script fits a fresh OneHotEncoder on the whole dataset —
-    that can't be replicated for a single row, so the same fixed one-hot
-    columns (with the same baseline categories dropped: gender_Male,
-    InternetService_Fiber optic, Contract_Month-to-month) are hardcoded
-    here instead of fitting an encoder per request.
-    """
+    """Convert one API request into the exact ordered model feature matrix."""
     row = {
         "SeniorCitizen": data.SeniorCitizen,
         "Partner": _yes_no(data.Partner),
@@ -153,14 +129,7 @@ def clean_customer_data(data: CustomerData) -> pd.DataFrame:
         "PaymentMethod_Electronic check": 1 if data.PaymentMethod == "Electronic check" else 0,
         "PaymentMethod_Mailed check": 1 if data.PaymentMethod == "Mailed check" else 0,
     }
-
-    df = pd.DataFrame([row], columns=FEATURE_COLUMNS)
-
-    CLEAN_SAMPLE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(CLEAN_SAMPLE_PATH, index=False)
-
-    # Read back from disk, per the requested workflow.
-    return pd.read_csv(CLEAN_SAMPLE_PATH)
+    return pd.DataFrame([row], columns=FEATURE_COLUMNS)
 
 
 @app.get("/health")
@@ -169,35 +138,46 @@ async def health():
 
 
 def _score_model(model_name: str, df: pd.DataFrame) -> ModelResult:
-    """Run one model against the already-cleaned dataframe."""
     try:
         model = load_model(model_name)
-        try:
-            proba = model.predict_proba(df)[0]
-            churn_probability = float(proba[1])
-        except AttributeError:
-            pred = model.predict(df)[0]
-            churn_probability = 1.0 if pred in (1, "Yes", "CHURN") else 0.0
+        if hasattr(model, "predict_proba"):
+            probabilities = model.predict_proba(df)[0]
+            classes = list(getattr(model, "classes_", range(len(probabilities))))
+            positive_index = classes.index(1) if 1 in classes else len(probabilities) - 1
+            churn_probability = float(probabilities[positive_index])
+        else:
+            prediction = model.predict(df)[0]
+            churn_probability = 1.0 if prediction in (1, "Yes", "CHURN") else 0.0
 
         label = "CHURN" if churn_probability >= 0.5 else "NO CHURN"
-        return ModelResult(model=model_name, prediction=label, probability=churn_probability)
-    except Exception as e:
-        # Don't let one bad/missing model file fail the whole request —
-        # surface the error for that model and keep going.
-        return ModelResult(model=model_name, prediction="ERROR", probability=0.0, error=str(e))
+        return ModelResult(
+            model=model_name,
+            prediction=label,
+            probability=churn_probability,
+        )
+    except Exception as error:
+        return ModelResult(
+            model=model_name,
+            prediction="ERROR",
+            probability=0.0,
+            error=str(error),
+        )
 
 
 @app.post("/predict", response_model=PredictionResponse)
 async def prediction(data: CustomerData):
-    df = clean_customer_data(data)
-
-    all_models = [_score_model(name, df) for name in ALL_MODEL_FILES]
-
-    primary = next((m for m in all_models if m.model == data.Model), None)
-    if primary is None:
+    if data.Model not in ALL_MODEL_FILES:
         raise HTTPException(status_code=400, detail=f"Unknown model: {data.Model}")
+
+    features = clean_customer_data(data)
+    all_models = [_score_model(name, features) for name in ALL_MODEL_FILES]
+    primary = next(result for result in all_models if result.model == data.Model)
+
     if primary.error:
-        raise HTTPException(status_code=500, detail=f"Model input mismatch — check preprocessing: {primary.error}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Selected model failed: {primary.error}",
+        )
 
     return PredictionResponse(
         prediction=primary.prediction,
