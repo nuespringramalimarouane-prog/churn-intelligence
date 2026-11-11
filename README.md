@@ -212,10 +212,22 @@ The training code exports scikit-learn objects directly. Keep the Python and sci
 
 ## Current Limitations
 
-- The frontend calls `/api/compare` for **Compare Models**, but `frontend/app/api/compare/route.ts` is empty in this checkout. Single-model prediction uses `/api/predict` and is the supported working flow; comparison will not return model results until that route is implemented.
+- **Compare Models** reuses the `all_models` results returned by `POST /predict`; it does not require a separate `/api/compare` route. Each model result includes its own prediction, probability, and optional error. A failed model is displayed as unavailable rather than being treated as `NO CHURN`.
 - The dashboard contains static KPI, distribution, and factor values. They are presentation values, not calculated from live prediction history.
 - `server.py` allows requests from all origins for local development. Restrict `allow_origins` before deploying publicly.
 - Pickle/joblib files should be loaded only from trusted sources. Do not place untrusted model files in the models directory.
+
+## Automated API Tests
+
+From `python-api/api`, install the API requirements and run `pytest`:
+
+```powershell
+cd python-api\api
+python -m pip install -r requirements.txt
+python -m pytest -q
+```
+
+The tests cover the API feature-column order, categorical value mapping, and per-model error reporting. They do not require the trained model artifacts.
 
 ## Production Build
 
