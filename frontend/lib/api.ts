@@ -75,7 +75,7 @@ export async function predictCustomer(data: CustomerData): Promise<Prediction> {
 // this just reshapes that data for the comparison view.
 export function compareModels(prediction: Prediction): Prediction[] {
   return prediction.all_models.map((m) => ({
-    prediction: m.prediction === "ERROR" ? "NO CHURN" : m.prediction,
+    prediction: m.prediction,
     probability: m.probability,
     model: m.model,
     customer: prediction.customer,
